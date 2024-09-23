@@ -1,0 +1,103 @@
+﻿FUNCTION FC_LiftControl : VOID
+VAR_INPUT
+    UpButton        : BOOL;   // I1 - кнопка "Вверх"
+    DownButton      : BOOL;   // I3 - кнопка "Вниз"
+    UpperLimit      : BOOL;   // I2 - верхний конечный выключатель
+    LowerLimit      : BOOL;   // I4 - нижний конечный выключатель
+    ObstacleSensor  : BOOL;   // I5 - датчики препятствий
+    StopButton      : BOOL;   // I6 - кнопка "Стоп"
+    EmergencyStop   : BOOL;   // I7 - аварийный останов
+END_VAR
+
+VAR_OUTPUT
+    MoveUp          : BOOL;   // Q1 - платформа вверх
+    MoveDown        : BOOL;   // Q2 - платформа вниз
+    WarningSignal   : BOOL;   // Q3 - мигающий предупредительный сигнал
+END_VAR
+
+VAR
+    IsMoving        : BOOL;   // Состояние движения платформы
+    ManualOverride  : BOOL;   // Ручной режим при обнаружении препятствия
+    ButtonPressTime : TIME;   // Время удержания кнопки
+    BlinkSignal     : BOOL;   // Вспомогательный флаг для мигания сигнала
+    TimerUp         : TON;    // Таймер для удержания кнопки > 2 секунд
+    TimerDown       : TON;    // Таймер для удержания кнопки > 2 секунд
+END_VAR
+
+BEGIN
+    // Логика аварийного останова
+    IF EmergencyStop THEN
+        MoveUp := FALSE;
+        MoveDown := FALSE;
+        WarningSignal := FALSE;
+        RETURN;  // Платформа останавливается немедленно, дальнейшие команды игнорируются
+    END_IF;
+
+    // Остановка платформы
+    IF StopButton THEN
+        MoveUp := FALSE;
+        MoveDown := FALSE;
+        WarningSignal := FALSE;
+    END_IF;
+
+    // Проверка на препятствия (датчики размыкающие, т.е. TRUE = нет препятствия, FALSE = есть препятствие)
+    IF NOT ObstacleSensor THEN
+        // Препятствие обнаружено
+        ManualOverride := FALSE;
+        
+        // Удержание кнопки > 2 секунд для ручного режима
+        IF UpButton THEN
+            TimerUp(IN := TRUE, PT := T#2S);
+        ELSE
+            TimerUp(IN := FALSE);
+        END_IF;
+
+        IF DownButton THEN
+            TimerDown(IN := TRUE, PT := T#2S);
+        ELSE
+            TimerDown(IN := FALSE);
+        END_IF;
+
+        IF TimerUp.Q OR TimerDown.Q THEN
+            ManualOverride := TRUE;  // Платформу можно двигать вручную
+        END_IF;
+    ELSE
+        // Нет препятствий, сбрасываем таймеры и режим ручного управления
+        TimerUp(IN := FALSE);
+        TimerDown(IN := FALSE);
+        ManualOverride := TRUE;
+    END_IF;
+
+    // Движение платформы вверх
+    IF UpButton AND ManualOverride AND NOT UpperLimit THEN
+        MoveUp := TRUE;
+        MoveDown := FALSE;
+        IsMoving := TRUE;
+    ELSEIF UpperLimit THEN
+        MoveUp := FALSE;  // Останавливаемся, если достигли верхнего положения
+    END_IF;
+
+    // Движение платформы вниз
+    IF DownButton AND ManualOverride AND NOT LowerLimit THEN
+        MoveDown := TRUE;
+        MoveUp := FALSE;
+        IsMoving := TRUE;
+    ELSEIF LowerLimit THEN
+        MoveDown := FALSE;  // Останавливаемся, если достигли нижнего положения
+    END_IF;
+
+    // Если нет движения, сброс флага
+    IF NOT UpButton AND NOT DownButton THEN
+        IsMoving := FALSE;
+    END_IF;
+
+    // Управление мигающим предупредительным сигналом
+    IF IsMoving THEN
+        // Мигаем с интервалом 500 мс
+        BlinkSignal := NOT BlinkSignal;
+        WarningSignal := BlinkSignal;
+    ELSE
+        WarningSignal := FALSE;  // Нет движения - световой сигнал выключен
+    END_IF;
+
+END_FUNCTION
